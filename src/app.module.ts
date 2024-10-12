@@ -25,11 +25,6 @@ import APP_GUARD from '@nestjs/core';
     TextModule,
   ],
   controllers: [],
-  providers: [
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
-  ],
+  providers: [],
 })
 export class AppModule {}
