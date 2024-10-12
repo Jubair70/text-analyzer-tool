@@ -2,14 +2,16 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TextModule } from './text/text.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import APP_GUARD from '@nestjs/core';
+import { APP_GUARD } from '@nestjs/core';
+import { AppService } from './app.service';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
     ThrottlerModule.forRoot([
       {
         ttl: 60000,
-        limit: 10,
+        limit: 5,
       },
     ]),
     TypeOrmModule.forRoot({
@@ -24,7 +26,13 @@ import APP_GUARD from '@nestjs/core';
     }),
     TextModule,
   ],
-  controllers: [],
-  providers: [],
+  controllers: [AppController],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
 })
 export class AppModule {}
