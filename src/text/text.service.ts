@@ -41,11 +41,27 @@ export class TextService {
 
   // Analysis Functions
   countWords(content: string): number {
-    return content.trim().split(/\s+/).length;
+    if (!content) return 0;
+    const words = content.match(/\b[\w']+\b/g);
+    return words ? words.length : 0;
   }
 
-  countCharacters(content: string): number {
-    return content.replace(/\s/g, '').length;
+  countCharacters(
+    content: string,
+    excludePunctuation: boolean = false,
+  ): number {
+    if (!content) return 0;
+
+    let processedContent = content;
+
+    if (excludePunctuation) {
+      // Remove all punctuation using Unicode-aware regex
+      processedContent = content.replace(/[^\p{L}\p{N}\p{M}\s]/gu, '');
+    }
+    // Remove all whitespace characters
+    processedContent = processedContent.replace(/\s/g, '');
+    // Return the length of the processed content
+    return processedContent.length;
   }
 
   countSentences(content: string): number {
@@ -53,29 +69,33 @@ export class TextService {
   }
 
   countParagraphs(content: string): number {
-    return content.split(/\n+/).filter(paragraph => paragraph.trim().length > 0).length;
+    return content
+      .split(/\n+/)
+      .filter((paragraph) => paragraph.trim().length > 0).length;
   }
 
   longestWordInParagraphs(content: string): string[] {
     if (!content) return [];
 
-  // Normalize the sentence: lowercase and remove punctuation
-  const normalizedSentence = content
-    .toLowerCase()
-    .replace(/[.,!?;:()'"`]/g, '');
+    // Normalize the sentence: lowercase and remove punctuation
+    const normalizedSentence = content
+      .toLowerCase()
+      .replace(/[.,!?;:()'"`]/g, '');
 
-  // Split the sentence into words based on whitespace
-  const words = normalizedSentence.split(/\s+/).filter(word => word.length > 0);
+    // Split the sentence into words based on whitespace
+    const words = normalizedSentence
+      .split(/\s+/)
+      .filter((word) => word.length > 0);
 
-  if (words.length === 0) return [];
+    if (words.length === 0) return [];
 
-  // Determine the maximum length among the words
-  const maxLength = Math.max(...words.map(word => word.length));
+    // Determine the maximum length among the words
+    const maxLength = Math.max(...words.map((word) => word.length));
 
-  // Filter and return all words that have the maximum length
-  const longestWords = words.filter(word => word.length === maxLength);
+    // Filter and return all words that have the maximum length
+    const longestWords = words.filter((word) => word.length === maxLength);
 
-  // Remove duplicates by converting to a Set and back to an array
-  return Array.from(new Set(longestWords));
+    // Remove duplicates by converting to a Set and back to an array
+    return Array.from(new Set(longestWords));
   }
 }

@@ -1,12 +1,13 @@
 module.exports = {
-    moduleFileExtensions: ['js', 'json', 'ts'],
-    // rootDir: 'src',
-    testRegex: '.*\\.spec\\.ts$',
-    transform: {
-      '^.+\\.(t|j)s$': 'ts-jest',
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  testMatch: ['**/*.spec.ts', '**/*.integration-spec.ts', '**/*.e2e-spec.ts'],
+  collectCoverage: true,
+  coverageDirectory: './coverage',
+  coverageReporters: ['text', 'lcov'],
+  globals: {
+    'ts-jest': {
+      tsconfig: 'tsconfig.json',
     },
-    collectCoverageFrom: ['**/*.(t|j)s'],
-    coverageDirectory: '../coverage',
-    testEnvironment: 'node',
-  };
-  
+  },
+};

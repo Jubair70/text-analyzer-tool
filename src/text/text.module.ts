@@ -1,5 +1,3 @@
-// src/text/text.module.ts
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TextController } from './text.controller';
