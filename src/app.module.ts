@@ -2,9 +2,14 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TextModule } from './text/text.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppService } from './app.service';
 import { AppController } from './app.controller';
+import { UserModule } from './user/user.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth/jwt-auth.guard';
+import { AuthModule } from './auth/auth.module';
+import { CacheInterceptor } from '@nestjs/cache-manager';
+
 
 @Module({
   imports: [
@@ -22,9 +27,11 @@ import { AppController } from './app.controller';
       password: process.env.DATABASE_PASSWORD || 'postgres',
       database: process.env.DATABASE_NAME || 'text_analyzer',
       autoLoadEntities: true,
-      synchronize: true, // Set to false in production and use migrations
+      synchronize: true, 
     }),
     TextModule,
+    UserModule,
+    AuthModule
   ],
   controllers: [AppController],
   providers: [
@@ -33,6 +40,14 @@ import { AppController } from './app.controller';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheInterceptor
+    }
   ],
 })
 export class AppModule {}
