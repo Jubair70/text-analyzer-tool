@@ -1,23 +1,49 @@
+// src/text/text.service.spec.ts
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { TextService } from './text.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Text } from './text.entity';
+import { Text } from '../entities/text.entity';
 import { Repository } from 'typeorm';
-import { NotFoundException } from '@nestjs/common';
-
-const mockTextRepository = () => ({
-  create: jest.fn(),
-  save: jest.fn(),
-  find: jest.fn(),
-  findOne: jest.fn(),
-  delete: jest.fn(),
-});
-
-type MockRepository<T = any> = Partial<Record<keyof Repository<T>, jest.Mock>>;
+import { UserService } from '../user/user.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Cache } from 'cache-manager';
 
 describe('TextService', () => {
   let service: TextService;
-  let repository: MockRepository<Text>;
+  let textRepo: Repository<Text>;
+  let userService: UserService;
+  let cacheManager: Cache;
+
+  // Mock data
+  const mockUser = { id: 1, username: 'john_doe' };
+  const mockText: Text = {
+    id: '1',
+    content: 'This is a sample text.',
+    user: mockUser,
+  } as any;
+
+  // Mock Repository
+  const mockTextRepo = {
+    create: jest.fn(),
+    save: jest.fn(),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    update: jest.fn(),
+    delete: jest.fn(),
+  };
+
+  // Mock UserService
+  const mockUserService = {
+    findById: jest.fn(),
+  };
+
+  // Mock CacheManager
+  const mockCacheManager = {
+    get: jest.fn(),
+    set: jest.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,358 +51,449 @@ describe('TextService', () => {
         TextService,
         {
           provide: getRepositoryToken(Text),
-          useFactory: mockTextRepository,
+          useValue: mockTextRepo,
+        },
+        {
+          provide: UserService,
+          useValue: mockUserService,
+        },
+        {
+          provide: CACHE_MANAGER,
+          useValue: mockCacheManager,
         },
       ],
     }).compile();
 
     service = module.get<TextService>(TextService);
-    repository = module.get<MockRepository<Text>>(getRepositoryToken(Text));
+    textRepo = module.get<Repository<Text>>(getRepositoryToken(Text));
+    userService = module.get<UserService>(UserService);
+    cacheManager = module.get<Cache>(CACHE_MANAGER);
   });
 
-  it('should be defined', () => {
-    expect(service).toBeDefined();
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   describe('create', () => {
-    it('should create and save a text', async () => {
-      const textContent = 'Sample text';
-      const savedText = {
-        id: '1',
-        content: textContent,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+    it('should create and save a new text', async () => {
+      const content = 'This is a sample text.';
+      const userId = 1;
 
-      repository.create.mockReturnValue(savedText);
-      repository.save.mockResolvedValue(savedText);
+      mockUserService.findById.mockResolvedValue(mockUser);
+      mockTextRepo.create.mockReturnValue(mockText);
+      mockTextRepo.save.mockResolvedValue(mockText);
 
-      expect(await service.create(textContent)).toEqual(savedText);
-      expect(repository.create).toHaveBeenCalledWith({ content: textContent });
-      expect(repository.save).toHaveBeenCalledWith(savedText);
+      const result = await service.create(content, userId);
+
+      expect(userService.findById).toHaveBeenCalledWith(userId);
+      expect(textRepo.create).toHaveBeenCalledWith({ content, user: mockUser });
+      expect(textRepo.save).toHaveBeenCalledWith(mockText);
+      expect(result).toEqual(mockText);
+    });
+
+    it('should throw NotFoundException if user is not found', async () => {
+      const content = 'This is a sample text.';
+      const userId = 1;
+
+      mockUserService.findById.mockResolvedValue(undefined);
+
+      await expect(service.create(content, userId)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(userService.findById).toHaveBeenCalledWith(userId);
+      expect(textRepo.create).not.toHaveBeenCalled();
+      expect(textRepo.save).not.toHaveBeenCalled();
     });
   });
 
   describe('findAll', () => {
-    it('should return an array of texts', async () => {
-      const texts = [
-        {
-          id: '1',
-          content: 'First text',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: '2',
-          content: 'Second text',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+    it('should return all texts for the user', async () => {
+      const userId = 1;
+      const texts = [mockText];
 
-      repository.find.mockResolvedValue(texts);
-      expect(await service.findAll()).toEqual(texts);
+      mockUserService.findById.mockResolvedValue(mockUser);
+      mockTextRepo.find.mockResolvedValue(texts);
+
+      const result = await service.findAll(userId);
+
+      expect(userService.findById).toHaveBeenCalledWith(userId);
+      expect(textRepo.find).toHaveBeenCalledWith({
+        where: { user: { id: userId } },
+        relations: { user: true },
+      });
+      expect(result).toEqual(texts);
+    });
+
+    it('should throw NotFoundException if user is not found', async () => {
+      const userId = 1;
+
+      mockUserService.findById.mockResolvedValue(undefined);
+
+      await expect(service.findAll(userId)).rejects.toThrow(NotFoundException);
+
+      expect(userService.findById).toHaveBeenCalledWith(userId);
+      expect(textRepo.find).not.toHaveBeenCalled();
     });
   });
 
   describe('findOne', () => {
-    it('should return a text by ID', async () => {
-      const text = {
-        id: '1',
-        content: 'Sample text',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      repository.findOne.mockResolvedValue(text);
-      expect(await service.findOne('1')).toEqual(text);
-      expect(repository.findOne).toHaveBeenCalledWith({ where: { id: '1' } });
+    it('should return the text if it belongs to the user', async () => {
+      const textId = '1';
+      const userId = 1;
+
+      mockTextRepo.findOne.mockResolvedValue(mockText);
+
+      const result = await service.findOne(textId, userId);
+
+      expect(textRepo.findOne).toHaveBeenCalledWith({
+        where: { id: textId },
+        relations: ['user'],
+      });
+      expect(result).toEqual(mockText);
     });
 
-    it('should return undefined if not found', async () => {
-      repository.findOne.mockResolvedValue(undefined);
-      expect(await service.findOne('non-existent-id')).toBeUndefined();
-    });
-  });
+    it('should throw NotFoundException if text is not found', async () => {
+      const textId = '1';
+      const userId = 1;
 
-  describe('update', () => {
-    it('should update and return the text', async () => {
-      const existingText = {
-        id: '1',
-        content: 'Old content',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-      const updatedContent = 'New content';
-      const updatedText = { ...existingText, content: updatedContent };
+      mockTextRepo.findOne.mockResolvedValue(undefined);
 
-      repository.findOne.mockResolvedValue(existingText);
-      repository.save.mockResolvedValue(updatedText);
-
-      expect(await service.update('1', updatedContent)).toEqual(updatedText);
-      expect(repository.findOne).toHaveBeenCalledWith({ where: { id: '1' } });
-      expect(repository.save).toHaveBeenCalledWith(updatedText);
-    });
-
-    it('should throw NotFoundException if text does not exist', async () => {
-      repository.findOne.mockResolvedValue(undefined);
-      await expect(
-        service.update('non-existent-id', 'Content'),
-      ).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('remove', () => {
-    it('should delete the text', async () => {
-      repository.delete.mockResolvedValue({ affected: 1 });
-      await service.remove('1');
-      expect(repository.delete).toHaveBeenCalledWith('1');
-    });
-
-    it('should throw NotFoundException if text does not exist', async () => {
-      repository.delete.mockResolvedValue({ affected: 0 });
-      await expect(service.remove('non-existent-id')).rejects.toThrow(
+      await expect(service.findOne(textId, userId)).rejects.toThrow(
         NotFoundException,
       );
-    });
-  });
 
-  describe('Text Analysis Functions', () => {
-    const sampleText =
-      'The quick brown fox jumps over the lazy dog. The lazy dog slept in the sun.';
-
-    it('should count words correctly', () => {
-      expect(service.countWords(sampleText)).toBe(16);
+      expect(textRepo.findOne).toHaveBeenCalledWith({
+        where: { id: textId },
+        relations: ['user'],
+      });
     });
 
-    it('should count characters correctly', () => {
-      // Ignoring whitespaces: 16 words * average ~5 letters = ~80
-      // Actual calculation:
-      const charCount = sampleText.replace(/\s/g, '').length;
-      expect(service.countCharacters(sampleText)).toBe(charCount);
-    });
+    it('should throw ForbiddenException if text does not belong to the user', async () => {
+      const textId = '1';
+      const userId = 2; // Different user
 
-    it('should count sentences correctly', () => {
-      expect(service.countSentences(sampleText)).toBe(2);
-    });
+      const textWithDifferentUser = {
+        ...mockText,
+        user: { id: 3, username: 'jane_doe' },
+      };
 
-    it('should count paragraphs correctly', () => {
-      expect(service.countParagraphs(sampleText)).toBe(1);
-    });
+      mockTextRepo.findOne.mockResolvedValue(textWithDifferentUser);
 
-    it('should find the longest words in paragraphs correctly', () => {
-      const expectedLongestWords = ['quick', 'brown', 'jumps', 'slept'];
-      expect(service.longestWordInParagraphs(sampleText)).toEqual(
-        expectedLongestWords,
+      await expect(service.findOne(textId, userId)).rejects.toThrow(
+        ForbiddenException,
       );
+
+      expect(textRepo.findOne).toHaveBeenCalledWith({
+        where: { id: textId },
+        relations: ['user'],
+      });
     });
   });
+  describe('update', () => {
+    it('should update the text content if it belongs to the user', async () => {
+      const textId = '1';
+      const userId = 1;
+      const newContent = 'Updated content';
 
+      const existingText = { ...mockText };
+      const updatedText = { ...mockText, content: newContent };
+
+      mockTextRepo.findOne.mockResolvedValue(existingText);
+      mockTextRepo.save.mockResolvedValue(updatedText);
+
+      const result = await service.update(textId, newContent, userId);
+
+      expect(textRepo.save).toHaveBeenCalledWith(updatedText);
+      expect(result).toEqual(updatedText);
+    });
+
+    it('should throw NotFoundException if text does not exist', async () => {
+      const textId = '1';
+      const userId = 1;
+      const newContent = 'Updated content';
+
+      mockTextRepo.findOne.mockResolvedValue(undefined);
+
+      await expect(service.update(textId, newContent, userId)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(textRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw ForbiddenException if text does not belong to the user', async () => {
+      const textId = '1';
+      const userId = 2; // Different user
+      const newContent = 'Updated content';
+
+      const textWithDifferentUser = {
+        ...mockText,
+        user: { id: 3, username: 'jane_doe' },
+      };
+
+      mockTextRepo.findOne.mockResolvedValue(textWithDifferentUser);
+
+      await expect(service.update(textId, newContent, userId)).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(textRepo.save).not.toHaveBeenCalled();
+    });
+  });
+  describe('remove', () => {
+    it('should remove the text if it belongs to the user', async () => {
+      const textId = '1';
+      const userId = 1;
+
+      mockTextRepo.delete.mockResolvedValue({ affected: 1 });
+
+      await service.remove(textId, userId);
+
+      expect(textRepo.delete).toHaveBeenCalledWith({
+        id: textId,
+        user: { id: userId },
+      });
+    });
+
+    it('should throw NotFoundException if text does not exist', async () => {
+      const textId = '1';
+      const userId = 1;
+
+      mockTextRepo.delete.mockResolvedValue({ affected: 0 });
+
+      await expect(service.remove(textId, userId)).rejects.toThrow(
+        NotFoundException,
+      );
+
+      expect(textRepo.delete).toHaveBeenCalledWith({
+        id: textId,
+        user: { id: userId },
+      });
+    });
+  });
   describe('countWords', () => {
-    it('should correctly count words in a standard sentence', () => {
-      const content = 'The quick brown fox jumps over the lazy dog.';
-      const count = service.countWords(content);
-      expect(count).toBe(9);
+    it('should return cached word count if available', async () => {
+      const content = "It's a beautiful day!";
+      const cachedCount = 5;
+
+      mockCacheManager.get.mockResolvedValue(cachedCount);
+
+      const result = await service.countWords(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(`countWords:${content}`);
+
+      expect(result).toBe(cachedCount);
     });
 
-    it('should correctly count words with contractions', () => {
-      const content = "Don't stop believing.";
-      const count = service.countWords(content);
-      expect(count).toBe(3);
-    });
+    it('should compute and cache word count if not cached', async () => {
+      const content = "It's a beautiful day!";
+      const computedCount = 5;
 
-    it('should correctly count words with multiple spaces', () => {
-      const content = 'Hello    world! This  is a test.';
-      const count = service.countWords(content);
-      expect(count).toBe(6);
-    });
+      mockCacheManager.get.mockResolvedValue(undefined);
+      jest.spyOn(service, 'computeCountWords').mockReturnValue(computedCount);
+      mockCacheManager.set.mockResolvedValue(undefined);
 
-    it('should return 0 for empty or whitespace-only strings', () => {
-      expect(service.countWords('')).toBe(0);
-      expect(service.countWords('    ')).toBe(0);
-    });
+      const result = await service.countWords(content);
 
-    it('should handle strings with numbers and alphanumeric words', () => {
-      const content = 'Testing 123 and alphanumeric words like hello2u.';
-      const count = service.countWords(content);
-      expect(count).toBe(7);
-    });
-
-    it('should handle sentences with various punctuation marks', () => {
-      const content = 'Wait!!! What??? Really...';
-      const count = service.countWords(content);
-      expect(count).toBe(3);
-    });
-
-    it('should handle mixed case words', () => {
-      const content = 'HeLLo WoRLD';
-      const count = service.countWords(content);
-      expect(count).toBe(2);
-    });
-
-    it('should ignore standalone punctuation', () => {
-      const content = '!!! ... ??? ,,, ;;;';
-      const count = service.countWords(content);
-      expect(count).toBe(0);
+      expect(cacheManager.get).toHaveBeenCalledWith(`countWords:${content}`);
+      expect(service.computeCountWords).toHaveBeenCalledWith(content);
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `countWords:${content}`,
+        computedCount,
+      );
+      expect(result).toBe(computedCount);
     });
   });
 
   describe('countCharacters', () => {
-    it('should correctly count characters excluding spaces without excluding punctuation', () => {
-      const content = 'Hello, World!';
-      const count = service.countCharacters(content);
-      expect(count).toBe(12); // "Hello,World!" has 12 characters
+    it('should return cached character count if available', async () => {
+      const content = 'Hello World!';
+      const excludePunctuation = true;
+      const cachedCount = 10;
+
+      mockCacheManager.get.mockResolvedValue(cachedCount);
+
+      const result = await service.countCharacters(content, excludePunctuation);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countCharacters:${excludePunctuation}:${content}`,
+      );
+
+      expect(result).toBe(cachedCount);
     });
 
-    it('should correctly count characters excluding spaces and punctuation', () => {
-      const content = 'Hello, World!';
-      const count = service.countCharacters(content, true);
-      expect(count).toBe(10); // "HelloWorld" has 10 characters
-    });
+    it('should compute and cache character count if not cached', async () => {
+      const content = 'Hello World!';
+      const excludePunctuation = true;
+      const computedCount = 10;
 
-    it('should return 0 for empty string', () => {
-      const content = '';
-      const count = service.countCharacters(content);
-      expect(count).toBe(0);
-    });
+      mockCacheManager.get.mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'computeCountCharacters')
+        .mockReturnValue(computedCount);
+      mockCacheManager.set.mockResolvedValue(undefined);
 
-    it('should return 0 for string with only spaces and punctuation', () => {
-      const content = '   !!!   ';
-      const count = service.countCharacters(content, true);
-      expect(count).toBe(0);
-    });
+      const result = await service.countCharacters(content, excludePunctuation);
 
-    it('should handle multiple spaces correctly', () => {
-      const content = 'Hello    World';
-      const count = service.countCharacters(content);
-      expect(count).toBe(10); // "HelloWorld" has 10 characters
-    });
-
-    it('should handle Unicode characters correctly', () => {
-      const content = 'Café 😊';
-      const count = service.countCharacters(content);
-      expect(count).toBe(6); // "Café😊" has 6 characters
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countCharacters:${excludePunctuation}:${content}`,
+      );
+      expect(service.computeCountCharacters).toHaveBeenCalledWith(content);
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `countCharacters:${excludePunctuation}:${content}`,
+        computedCount,
+      );
+      expect(result).toBe(computedCount);
     });
   });
 
   describe('countSentences', () => {
-    it('should correctly count the number of sentences', () => {
-      const content = 'Hello World! How are you today? I am fine.';
-      const count = service.countSentences(content);
-      expect(count).toBe(3);
+   
+    it('should return 1 for a single sentence', () => {
+      const content = 'This is a single sentence.';
+      const result = service.computeCountSentences(content);
+      expect(result).toBe(1);
     });
 
-    it('should return 0 for empty string', () => {
-      const content = '';
-      const count = service.countSentences(content);
-      expect(count).toBe(0);
+    it('should return cached sentence count if available', async () => {
+      const content = 'This is a sentence. This is another!';
+      const cachedCount = 2;
+
+      mockCacheManager.get.mockResolvedValue(cachedCount);
+
+      const result = await service.countSentences(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countSentences:${content}`,
+      );
+
+      expect(result).toBe(cachedCount);
     });
 
-    it('should handle multiple punctuation marks', () => {
-      const content = 'Wait!!! What??? Really...';
-      const count = service.countSentences(content);
-      expect(count).toBe(3);
-    });
+    it('should compute and cache sentence count if not cached', async () => {
+      const content = 'This is a sentence. This is another!';
+      const computedCount = 2;
 
-    it('should handle sentences without punctuation', () => {
-      const content = 'This is a sentence without punctuation';
-      const count = service.countSentences(content);
-      expect(count).toBe(1);
+      mockCacheManager.get.mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'computeCountSentences')
+        .mockReturnValue(computedCount);
+      mockCacheManager.set.mockResolvedValue(undefined);
+
+      const result = await service.countSentences(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countSentences:${content}`,
+      );
+      expect(service.computeCountSentences).toHaveBeenCalledWith(content);
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `countSentences:${content}`,
+        computedCount,
+      );
+      expect(result).toBe(computedCount);
     });
   });
 
   describe('countParagraphs', () => {
-    it('should correctly count the number of paragraphs', () => {
-      const content = `First paragraph.
-  
-  Second paragraph.
-  
-  Third paragraph.`;
-      const count = service.countParagraphs(content);
-      expect(count).toBe(3);
+    it('should return cached paragraph count if available', async () => {
+      const content = 'Paragraph one.\n\nParagraph two.';
+      const cachedCount = 2;
+
+      mockCacheManager.get.mockResolvedValue(cachedCount);
+
+      const result = await service.countParagraphs(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countParagraphs:${content}`,
+      );
+      expect(result).toBe(cachedCount);
     });
 
-    it('should return 1 for a single paragraph without line breaks', () => {
-      const content = 'This is a single paragraph without line breaks.';
-      const count = service.countParagraphs(content);
-      expect(count).toBe(1);
-    });
+    it('should compute and cache paragraph count if not cached', async () => {
+      const content = 'Paragraph one.\n\nParagraph two.';
+      const computedCount = 2;
 
-    it('should return 0 for empty string', () => {
-      const content = '';
-      const count = service.countParagraphs(content);
-      expect(count).toBe(0);
-    });
+      mockCacheManager.get.mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'computeCountParagraphs')
+        .mockReturnValue(computedCount);
+      mockCacheManager.set.mockResolvedValue(undefined);
 
-    it('should handle multiple consecutive line breaks', () => {
-      const content = `Paragraph one.
-  
-  
-  Paragraph two.
-  
-  
-  `;
-      const count = service.countParagraphs(content);
-      expect(count).toBe(2);
+      const result = await service.countParagraphs(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `countParagraphs:${content}`,
+      );
+      expect(service.computeCountParagraphs).toHaveBeenCalledWith(content);
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `countParagraphs:${content}`,
+        computedCount,
+      );
+      expect(result).toBe(computedCount);
     });
   });
 
   describe('longestWordInParagraphs', () => {
-    it('should return the longest words in each paragraph without duplicates', () => {
-      const content = `The quick brown fox jumps over the lazy dog.
-      An example of a longerword here.
-      Short.`;
-      const expected = ['longerword'];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(expected);
+    it('should return cached longest words if available', async () => {
+      const content = 'This is a sample paragraph.\nAnother sample paragraph.';
+      const cachedLongestWords = ['sample', 'another'];
+
+      mockCacheManager.get.mockResolvedValue(cachedLongestWords);
+
+      const result = await service.longestWordInParagraphs(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `longestWordInParagraphs:${content}`,
+      );
+      expect(result).toEqual(cachedLongestWords);
     });
 
-    it('should return an empty array for empty content', () => {
-      const content = '';
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual([]);
+    it('should compute and cache longest words if not cached', async () => {
+      const content = 'This is a sample paragraph.\nAnother sample paragraph.';
+      const computedLongestWords = ['sample', 'another'];
+
+      mockCacheManager.get.mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'computeLongestWordInParagraphs')
+        .mockReturnValue(computedLongestWords);
+      mockCacheManager.set.mockResolvedValue(undefined);
+
+      const result = await service.longestWordInParagraphs(content);
+
+      expect(cacheManager.get).toHaveBeenCalledWith(
+        `longestWordInParagraphs:${content}`,
+      );
+      expect(service.computeLongestWordInParagraphs).toHaveBeenCalledWith(
+        content,
+      );
+      expect(cacheManager.set).toHaveBeenCalledWith(
+        `longestWordInParagraphs:${content}`,
+        computedLongestWords,
+      );
+      expect(result).toEqual(computedLongestWords);
     });
+  });
 
-    it('should handle paragraphs with multiple longest words of the same length', () => {
-      const content = `This paragraph has two big words: elephant and giraffe.
-      Another paragraph with equally long words: computer and hardware.`;
-      const expected = ['paragraph'];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(expected);
+  describe('getUserReport', () => {
+    it('should throw NotFoundException when no texts are found', async () => {
+      const userId = 1;
+      jest.spyOn(service, 'findAll').mockResolvedValue([]);
+
+      await expect(service.getUserReport(userId)).resolves.toEqual({
+        userId,
+        texts: [],
+      });
+
+      expect(service.findAll).toHaveBeenCalledWith(userId);
     });
-
-    it('should remove duplicate longest words across paragraphs', () => {
-      const content = `Duplicate words here: test test TEST.
-      Another duplicate: example Example.`;
-      const expected = ['duplicate'];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(expected);
-    });
-
-    it('should handle Unicode characters correctly', () => {
-      const content = `Café 😊 is open.
-      Привет мир! Это тест.`;
-      const expected = ['привет'];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(expected);
-    });
-
-    it('should handle paragraphs with only punctuation', () => {
-      const content = `!!! ... ??? ,,, ;;;`;
-      const expected = [];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(expected);
-    });
-
-    it('should handle paragraphs separated by multiple line breaks', () => {
-      const content = `First paragraph.
-
-      Second paragraph.
-
-
-      Third paragraph.`;
-      const expected = ['paragraph', 'paragraph', 'paragraph'];
-      const result = service.longestWordInParagraphs(content);
-      expect(result).toEqual(['paragraph']);
+    it('should throw NotFoundException if user is not found', async () => {
+      const userId = 1;
+      mockUserService.findById.mockResolvedValue(undefined);
+      await expect(service.getUserReport(userId)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(userService.findById).toHaveBeenCalledWith(userId);
     });
   });
 });

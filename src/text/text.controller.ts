@@ -1,71 +1,93 @@
-import { Controller, Get, Post, Body, Param, Put, Delete,UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete,UseGuards,Req, UseInterceptors } from '@nestjs/common';
 import { TextService } from './text.service';
-import { Text } from './text.entity';
-import { JwtStrategy } from '../auth/jwt.strategy';
-import { Throttle } from '@nestjs/throttler';
+import { Text } from '../entities/text.entity';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth/jwt-auth.guard';
+import { Request } from 'express';
 
 @Controller('texts')
-@UseGuards(JwtStrategy) 
+@UseGuards(JwtAuthGuard)
 export class TextController {
   constructor(private readonly textService: TextService) {}
 
   @Post()
-  create(@Body('content') content: string): Promise<Text> {
-    return this.textService.create(content);
+  create(@Body('content') content: string, @Req() req: Request): Promise<Text> {
+    const user = req.user as any;
+    return this.textService.create(content, user.id);
   }
 
   @Get()
-  findAll(): Promise<Text[]> {
-    return this.textService.findAll();
+  findAll(@Req() req: Request): Promise<Text[]> {
+    const user = req.user as any;
+    return this.textService.findAll(user.id);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<Text> {
-    return this.textService.findOne(id);
+  findOne(@Param('id') id: string,@Req() req: Request): Promise<Text> {
+    const user = req.user as any;
+    return this.textService.findOne(id, user.id);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body('content') content: string): Promise<Text> {
-    return this.textService.update(id, content);
+  update(@Param('id') id: string, @Body('content') content: string, @Req() req: Request): Promise<Text> {
+    const user = req.user as any;
+    return this.textService.update(id, content, user.id);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string): Promise<void> {
-    return this.textService.remove(id);
+  remove(@Param('id') id: string, @Req() req: Request): Promise<void> {
+    const user = req.user as any;
+    return this.textService.remove(id, user.id);
   }
 
   @Get(':id/word-count')
-  getWordCount(@Param('id') id: string): Promise<{ count: number }> {
-    return this.textService.findOne(id).then(text => ({
-      count: this.textService.countWords(text.content),
-    }));
+  async getWordCount(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    let countPromise = await this.textService.findOne(id, user.id).then(res=>res.content)
+    return {
+      count: await this.textService.countWords(countPromise),
+    }
   }
 
   @Get(':id/character-count')
-  getCharacterCount(@Param('id') id: string): Promise<{ count: number }> {
-    return this.textService.findOne(id).then(text => ({
-      count: this.textService.countCharacters(text.content),
-    }));
+  async getCharacterCount(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    let countPromise = await this.textService.findOne(id, user.id).then(res=>res.content)
+    return {
+      count: await this.textService.countCharacters(countPromise),
+    }
   }
 
   @Get(':id/sentence-count')
-  getSentenceCount(@Param('id') id: string): Promise<{ count: number }> {
-    return this.textService.findOne(id).then(text => ({
-      count: this.textService.countSentences(text.content),
-    }));
+  async getSentenceCount(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    let countPromise = await this.textService.findOne(id, user.id).then(res=>res.content)
+    return {
+      count: await this.textService.countSentences(countPromise),
+    }
   }
 
   @Get(':id/paragraph-count')
-  getParagraphCount(@Param('id') id: string): Promise<{ count: number }> {
-    return this.textService.findOne(id).then(text => ({
-      count: this.textService.countParagraphs(text.content),
-    }));
+  async getParagraphCount(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    let countPromise = await this.textService.findOne(id, user.id).then(res=>res.content)
+    return {
+      count: await this.textService.countParagraphs(countPromise),
+    }
   }
 
   @Get(':id/longest-words')
-  getLongestWords(@Param('id') id: string): Promise<{ longestWords: string[] }> {
-    return this.textService.findOne(id).then(text => ({
-      longestWords: this.textService.longestWordInParagraphs(text.content),
-    }));
+  async getLongestWords(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as any;
+    let countPromise = await this.textService.findOne(id, user.id).then(res=>res.content)
+    return {
+      longestWords: await this.textService.longestWordInParagraphs(countPromise),
+    }
+    
+  }
+
+  @Get('report/user')
+  async getUserReport(@Req() req: Request): Promise<any> {
+    const user = req.user as any;
+    return this.textService.getUserReport(user.id);
   }
 }
